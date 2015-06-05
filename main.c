@@ -7,6 +7,7 @@
 #include <X11/Xutil.h>
 #include <cairo/cairo-xlib.h>
 #include <pango/pangocairo.h>
+#include "utf8.h"
 
 Atom wm_protocols;
 Atom wm_delete_window;
@@ -115,6 +116,15 @@ void term_redraw(Term *t) {
 }
 
 void term_movecursor(Term *t, int n) {
+    if (n > 0) {
+        n = decoderune(t->text+t->cursor_pos, t->textlen-t->cursor_pos, NULL);
+        printf("%.*s\n", n, t->text+t->cursor_pos);
+    } else if (n < 0) {
+        n = -decodelastrune(t->text, t->cursor_pos, NULL);
+        printf("%.*s\n", -n, t->text+t->cursor_pos+n);
+    } else {
+        return;
+    }
     if (t->cursor_pos + n >= 0)
     if (t->cursor_pos + n <= t->textlen) {
         t->cursor_pos += n;
@@ -248,7 +258,7 @@ int main() {
     pango_layout_set_font_description(t.layout, desc);
     pango_font_description_free(desc);
 
-    char text[256] = "Hello, world! abdfgylqptjkb";
+    char text[256] = "Hello, world! Pokémon.";
     t.text = text;
     t.textlen = strlen(t.text);
     t.textcap = sizeof text;
