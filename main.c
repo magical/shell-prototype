@@ -131,6 +131,32 @@ void term_movecursor(Term *t, int n) {
     }
 }
 
+void term_inserttext(Term *t, char *buf, size_t len) {
+    int i = t->cursor_pos;
+    if (t->textcap - t->textlen < len) {
+        return;
+    }
+    memmove(t->text+i+len, t->text+i, t->textlen-i);
+    memmove(t->text+i, buf, len);
+    t->textlen += len;
+    t->cursor_pos += len;
+}
+
+void term_backspace(Term *t) {
+    int i = t->cursor_pos;
+    int len;
+    int32_t r;
+    len = decodelastrune(t->text, i, &r);
+    if (len == 0) {
+        return;
+    }
+    if (i < t->textlen) {
+        memmove(t->text+i-len, t->text+i, t->textlen-i);
+    }
+    t->textlen -= len;
+    t->cursor_pos -= len;
+}
+
 int event_loop(Term *t) {
     XEvent e;
     KeySym sym;
@@ -173,23 +199,14 @@ int event_loop(Term *t) {
                 term_redraw(t);
                 break;
             case XK_BackSpace:
-                if (t->cursor_pos == t->textlen) {
-                    t->textlen--;
-                }
-                term_movecursor(t, -1);
+                term_backspace(t);
                 term_redraw(t);
                 break;
             default:
                 // TODO Xmb
                 n = XLookupString(&e.xkey, buf, sizeof buf, &sym, NULL);
                 if (n == 1 && 0x20 <= buf[0] && buf[0] <= 0x7e) {
-                    if (t->cursor_pos < t->textcap) {
-                        if (t->cursor_pos == t->textlen) {
-                            t->textlen++;
-                        }
-                        t->text[t->cursor_pos] = buf[0];
-                        t->cursor_pos += n;
-                    }
+                    term_inserttext(t, buf, n);
                     term_redraw(t);
                     break;
                 }
@@ -258,7 +275,7 @@ int main() {
     pango_layout_set_font_description(t.layout, desc);
     pango_font_description_free(desc);
 
-    char text[256] = "Hello, world! Pokémon.";
+    char text[256] = "Hello, world! Pokémon. ポケモン. ポケットモンスター";
     t.text = text;
     t.textlen = strlen(t.text);
     t.textcap = sizeof text;
