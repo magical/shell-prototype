@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <locale.h>
 #include <time.h>
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
@@ -15,6 +16,8 @@ Atom wm_delete_window;
 typedef struct Term Term;
 struct Term {
     Display *display;
+    XIM im;
+    XIC ic;
     cairo_surface_t *surface;
     cairo_t *cr;
     PangoLayout *layout;
@@ -63,7 +66,6 @@ cairo_surface_t *cairo_create_x11_surface(Display *display, int x, int y) {
 
     // Create surface
     surface = cairo_xlib_surface_create(display, win, visual, x, y);
-    cairo_xlib_surface_set_size(surface, x, y);
 
     return surface;
 }
@@ -166,6 +168,9 @@ int event_loop(Term *t) {
     int trailing;
     for (;;) {
         XNextEvent(t->display, &e);
+        if (XFilterEvent(&e, None)) {
+            continue;
+        }
         switch (e.type) {
         case ButtonPress:
             pango_layout_xy_to_index(t->layout,
@@ -178,7 +183,7 @@ int event_loop(Term *t) {
             break;
 
         case KeyPress:
-            sym = XLookupKeysym(&e.xkey, 0);
+            n = Xutf8LookupString(t->ic, &e.xkey, buf, sizeof buf, &sym, NULL);
             switch(sym) {
             case XK_Escape:
                 goto cleanup;
@@ -203,14 +208,13 @@ int event_loop(Term *t) {
                 term_redraw(t);
                 break;
             default:
-                // TODO Xmb
-                n = XLookupString(&e.xkey, buf, sizeof buf, &sym, NULL);
-                if (n == 1 && 0x20 <= buf[0] && buf[0] <= 0x7e) {
-                    term_inserttext(t, buf, n);
-                    term_redraw(t);
+                printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
+                if (n == 1 && buf[0] < 0x20) {
                     break;
                 }
-                printf("unknown key %ld\n", sym);
+                term_inserttext(t, buf, n);
+                term_redraw(t);
+                break;
             }
             break;
 
@@ -250,8 +254,14 @@ int main() {
     PangoFontDescription *desc;
     Term t;
 
+    setlocale(LC_ALL, "");
     t.display = XOpenDisplay(NULL);
     if (t.display == NULL) {
+        exit(1);
+    }
+
+    t.im = XOpenIM(t.display, NULL, NULL, NULL);
+    if (t.im == NULL) {
         exit(1);
     }
 
@@ -271,7 +281,19 @@ int main() {
         exit(1);
     }
 
-    desc = pango_font_description_from_string("Sans 10");
+    // Create input context
+    t.ic = XCreateIC(t.im,
+        XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
+        XNClientWindow, cairo_xlib_surface_get_drawable(t.surface),
+        XNFocusWindow, cairo_xlib_surface_get_drawable(t.surface),
+        NULL);
+    if (t.ic == NULL) {
+        fprintf(stderr, "couldn't create input context\n");
+        exit(1);
+    }
+    XSetICFocus(t.ic);
+
+    desc = pango_font_description_from_string("Serif 15");
     pango_layout_set_font_description(t.layout, desc);
     pango_font_description_free(desc);
 
@@ -288,6 +310,8 @@ int main() {
     g_object_unref(t.layout);
     cairo_destroy(t.cr);
     cairo_surface_destroy(t.surface);
+    XDestroyIC(t.ic);
+    XCloseIM(t.im);
     XCloseDisplay(t.display);
     return 0;
 }
