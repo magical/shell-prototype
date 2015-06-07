@@ -7,7 +7,7 @@
 // T2 1110bbbb 10bbbbbb 10bbbbbb
 // T3 11110bbb 10bbbbbb 10bbbbbb 10bbbbbb
 
-int _decoderune(unsigned char *buf, size_t buflen, int32_t *r) {
+int _utf8decode(unsigned char *buf, size_t buflen, int32_t *r) {
     size_t i, len;
     unsigned int x;
 
@@ -51,7 +51,7 @@ int _decoderune(unsigned char *buf, size_t buflen, int32_t *r) {
     return len;
 }
 
-int _decodelastrune(unsigned char *buf, size_t buflen, int32_t *r) {
+int _utf8decodelast(unsigned char *buf, size_t buflen, int32_t *r) {
     int len;
     size_t i, limit;
     if (buflen == 0) {
@@ -71,7 +71,7 @@ int _decodelastrune(unsigned char *buf, size_t buflen, int32_t *r) {
             break;
         }
     }
-    len = _decoderune(buf+i, buflen-i, r);
+    len = _utf8decode(buf+i, buflen-i, r);
     if (len != buflen-i) {
         *r = RuneError;
         return 1;
@@ -79,18 +79,18 @@ int _decodelastrune(unsigned char *buf, size_t buflen, int32_t *r) {
     return len;
 }
 
-int decoderune(char *buf, size_t buflen, int32_t *r) {
+int utf8decode(char *buf, size_t buflen, int32_t *r) {
     if (r == NULL) {
         int32_t rr;
-        return _decoderune((unsigned char*)buf, buflen, &rr);
+        return _utf8decode((unsigned char*)buf, buflen, &rr);
     }
-    return _decoderune((unsigned char*)buf, buflen, r);
+    return _utf8decode((unsigned char*)buf, buflen, r);
 }
 
-int decodelastrune(char *buf, size_t buflen, int32_t *r) {
+int utf8decodelast(char *buf, size_t buflen, int32_t *r) {
     if (r == NULL) {
         int32_t rr;
-        return _decodelastrune((unsigned char*)buf, buflen, &rr);
+        return _utf8decodelast((unsigned char*)buf, buflen, &rr);
     }
-    return _decodelastrune((unsigned char*)buf, buflen, r);
+    return _utf8decodelast((unsigned char*)buf, buflen, r);
 }

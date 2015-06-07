@@ -119,11 +119,11 @@ void term_redraw(Term *t) {
 
 void term_movecursor(Term *t, int n) {
     if (n > 0) {
-        n = decoderune(t->text+t->cursor_pos, t->textlen-t->cursor_pos, NULL);
-        printf("%.*s\n", n, t->text+t->cursor_pos);
+        n = utf8decode(t->text+t->cursor_pos, t->textlen-t->cursor_pos, NULL);
+        //printf("%.*s\n", n, t->text+t->cursor_pos);
     } else if (n < 0) {
-        n = -decodelastrune(t->text, t->cursor_pos, NULL);
-        printf("%.*s\n", -n, t->text+t->cursor_pos+n);
+        n = -utf8decodelast(t->text, t->cursor_pos, NULL);
+        //printf("%.*s\n", -n, t->text+t->cursor_pos+n);
     } else {
         return;
     }
@@ -148,7 +148,7 @@ void term_backspace(Term *t) {
     int i = t->cursor_pos;
     int len;
     int32_t r;
-    len = decodelastrune(t->text, i, &r);
+    len = utf8decodelast(t->text, i, &r);
     if (len == 0) {
         return;
     }
@@ -177,7 +177,7 @@ int event_loop(Term *t) {
                 (e.xbutton.x-t->border)*PANGO_SCALE,
                 (e.xbutton.y-t->border)*PANGO_SCALE,
                 &index, &trailing);
-            printf("%d,%d = %d (%d)\n", e.xbutton.x, e.xbutton.y, index, trailing);
+            //printf("%d,%d = %d (%d)\n", e.xbutton.x, e.xbutton.y, index, trailing);
             t->cursor_pos = index;
             term_redraw(t);
             break;
