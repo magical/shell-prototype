@@ -30,6 +30,9 @@ struct Term {
     int cursor_type;
     int border;
 
+    cairo_pattern_t *fg;
+    cairo_pattern_t *bg;
+
     char *scrollback;
 };
 
@@ -70,8 +73,8 @@ cairo_surface_t *cairo_create_x11_surface(Display *display, int x, int y) {
     return surface;
 }
 
-void draw_text(cairo_t *cr, PangoLayout *layout, const char* text, size_t len) {
-    cairo_set_source_rgb(cr, 0, 0, 1);
+void draw_text(cairo_t *cr, PangoLayout *layout, cairo_pattern_t *fg, const char* text, size_t len) {
+    cairo_set_source(cr, fg);
     pango_layout_set_text(layout, text, len);
     pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
     pango_cairo_update_layout(cr, layout);
@@ -84,36 +87,51 @@ void draw_cursor(Term *t) {
     double d = PANGO_SCALE;
     rect.x += t->border*d;
     rect.y += t->border*d;
-    cairo_set_source_rgb(t->cr, 0, 0, 0);
+    cairo_set_source(t->cr, t->fg);
     switch (t->cursor_type) {
     default:
+        // solid box
         cairo_rectangle(t->cr, rect.x/d, rect.y/d, rect.width/d, rect.height/d);
+        cairo_clip(t->cr);
+        cairo_paint(t->cr);
+        cairo_set_source(t->cr, t->bg);
+        cairo_rectangle(t->cr, rect.x/d, rect.y/d, rect.width/d, rect.height/d);
+        cairo_clip(t->cr);
+        cairo_move_to(t->cr, t->border, t->border);
+        pango_cairo_show_layout(t->cr, t->layout);
         break;
     case 1:
+        // box outline
         cairo_rectangle(t->cr, rect.x/d+.5, rect.y/d+.5, rect.width/d-1, rect.height/d-1);
         cairo_set_line_width(t->cr, 1);
         cairo_stroke(t->cr);
         break;
     case 2:
+        // vertical line
         cairo_rectangle(t->cr, rect.x/d - 1, rect.y/d, 1, rect.height/d);
-        cairo_rectangle(t->cr, rect.x/d - 2, rect.y/d - 2, 3, 3);
-        cairo_rectangle(t->cr, rect.x/d - 2, (rect.y + rect.height)/d - 2, 3, 3);
+        cairo_rectangle(t->cr, rect.x/d - 2, rect.y/d, 3, 3);
+        cairo_rectangle(t->cr, rect.x/d - 2, (rect.y + rect.height)/d - 3, 3, 3);
+        cairo_fill(t->cr);
         break;
     }
-    cairo_clip(t->cr);
-    cairo_paint(t->cr);
 }
 
 void term_redraw(Term *t) {
-    cairo_t *cr = t->cr;
-    cairo_push_group(cr);
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_paint(cr);
-    cairo_move_to(cr, t->border, t->border);
-    draw_text(cr, t->layout, t->text, t->textlen);
+    cairo_push_group(t->cr);
+
+    // Draw background
+    cairo_set_source(t->cr, t->bg);
+    cairo_paint(t->cr);
+
+    // Draw text
+    cairo_move_to(t->cr, t->border, t->border);
+    draw_text(t->cr, t->layout, t->fg, t->text, t->textlen);
+
+    // Draw cursor
     draw_cursor(t);
-    cairo_pop_group_to_source(cr);
-    cairo_paint(cr);
+
+    cairo_pop_group_to_source(t->cr);
+    cairo_paint(t->cr);
     cairo_surface_flush(t->surface);
 }
 
@@ -203,15 +221,23 @@ int event_loop(Term *t) {
                 t->cursor_pos = t->textlen;
                 term_redraw(t);
                 break;
+            case XK_F1:
+                t->cursor_type = (t->cursor_type + 3 - 1) % 3;
+                term_redraw(t);
+                break;
+            case XK_F2:
+                t->cursor_type = (t->cursor_type + 1) % 3;
+                term_redraw(t);
+                break;
             case XK_BackSpace:
                 term_backspace(t);
                 term_redraw(t);
                 break;
             default:
-                printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
                 if (n == 1 && buf[0] < 0x20) {
                     break;
                 }
+                //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
                 term_inserttext(t, buf, n);
                 term_redraw(t);
                 break;
@@ -293,7 +319,7 @@ int main() {
     }
     XSetICFocus(t.ic);
 
-    desc = pango_font_description_from_string("Serif 15");
+    desc = pango_font_description_from_string("Dina 10");
     pango_layout_set_font_description(t.layout, desc);
     pango_font_description_free(desc);
 
@@ -302,11 +328,16 @@ int main() {
     t.textlen = strlen(t.text);
     t.textcap = sizeof text;
     t.cursor_pos = 0;
-    t.cursor_type = 1;
+    t.cursor_type = 0;
     t.border = 2;
+
+    t.fg = cairo_pattern_create_rgb(0, 0, 0);
+    t.bg = cairo_pattern_create_rgb(1, 1, 0xd5/256.0);
 
     event_loop(&t);
 
+    cairo_pattern_destroy(t.fg);
+    cairo_pattern_destroy(t.bg);
     g_object_unref(t.layout);
     cairo_destroy(t.cr);
     cairo_surface_destroy(t.surface);
