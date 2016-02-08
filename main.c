@@ -177,6 +177,13 @@ void term_backspace(Term *t) {
     t->cursor_pos -= len;
 }
 
+void term_set_font(Term *t, const char *name) {
+    PangoFontDescription *desc;
+    desc = pango_font_description_from_string(name);
+    pango_layout_set_font_description(t->layout, desc);
+    pango_font_description_free(desc);
+}
+
 int event_loop(Term *t) {
     XEvent e;
     KeySym sym;
@@ -229,6 +236,14 @@ int event_loop(Term *t) {
                 t->cursor_type = (t->cursor_type + 1) % 3;
                 term_redraw(t);
                 break;
+            case XK_F3:
+                term_set_font(t, "Sans 10");
+                term_redraw(t);
+                break;
+            case XK_F4:
+                term_set_font(t, "Dina 10");
+                term_redraw(t);
+                break;
             case XK_BackSpace:
                 term_backspace(t);
                 term_redraw(t);
@@ -277,7 +292,6 @@ cleanup:
 }
 
 int main() {
-    PangoFontDescription *desc;
     Term t;
 
     setlocale(LC_ALL, "");
@@ -319,9 +333,7 @@ int main() {
     }
     XSetICFocus(t.ic);
 
-    desc = pango_font_description_from_string("Dina 10");
-    pango_layout_set_font_description(t.layout, desc);
-    pango_font_description_free(desc);
+    term_set_font(&t, "Sans 10");
 
     char text[256] = "Hello, world! Pokémon. ポケモン. ポケットモンスター";
     t.text = text;
