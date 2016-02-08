@@ -4,10 +4,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <pty.h>
-#include <sys/select.h>
 
-const char* shell = "/usr/lib/plan9/bin/cat";
-char* shellargs[] = {"cat", 0};
+static const char* shell = "/usr/lib/plan9/bin/rc";
+static char* shellargs[] = {"rc", 0};
 
 int shellfd;
 int shellpid;
@@ -30,10 +29,11 @@ void exec_shell(void) {
 }
 
 void fork_shell(void) {
-    int fd[2];
+    int mfd;
+    int sfd;
     int err;
 
-    err = openpty(&fd[1], &fd[0], NULL, NULL, NULL);
+    err = openpty(&mfd, &sfd, NULL, NULL, NULL);
     if (err < 0) {
         perror("openpty");
         exit(1);
@@ -45,31 +45,27 @@ void fork_shell(void) {
         exit(1);
         break;
     case 0:
+        close(mfd);
         setsid();
-        dup2(fd[1], 0);
-        dup2(fd[1], 1);
-        dup2(fd[1], 2);
-        close(fd[0]);
+        dup2(sfd, 0);
+        dup2(sfd, 1);
+        dup2(sfd, 2);
+        ioctl(sfd, TIOCSCTTY, NULL);
         exec_shell();
         break;
     default:
-        close(fd[1]);
+        close(sfd);
         shellpid = err;
-        shellfd = fd[0];
+        shellfd = mfd;
         //signal(SIGCHLD, sigchld);
         break;
     }
 }
 
-size_t read_shell(char* buf, size_t size) {
-    struct timeval tv = {0, 1000};
-    fd_set rfd;
-    fd_set errfd;
-    FD_ZERO(&rfd);
-    FD_SET(shellfd, &rfd);
-    FD_SET(shellfd, &errfd);
-    if (!select(shellfd+1, &rfd, NULL, &errfd, &tv)) {
-        return 0;
-    }
+ssize_t read_shell(char* buf, size_t size) {
     return read(shellfd, buf, size);
+}
+
+ssize_t write_shell(char* buf, size_t size) {
+    return write(shellfd, buf, size);
 }

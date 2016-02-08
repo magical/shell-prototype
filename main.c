@@ -9,6 +9,7 @@
 #include <cairo/cairo-xlib.h>
 #include <pango/pangocairo.h>
 #include "utf8.h"
+#include "shell.h"
 
 Atom wm_protocols;
 Atom wm_delete_window;
@@ -187,11 +188,51 @@ void term_set_font(Term *t, const char *name) {
 int event_loop(Term *t) {
     XEvent e;
     KeySym sym;
+    char rbuf[256];
     char buf[32];
+    int xfd;
+    int maxfd;
     int n;
     int index;
     int trailing;
+    int err;
+
+    struct timeval tv = {0, 1000}; // one millisecond
+    fd_set rfd;
+
+    xfd = ConnectionNumber(t->display);
+
+    maxfd = shellfd;
+    if (xfd > maxfd) {
+        maxfd = xfd;
+    }
+
     for (;;) {
+        FD_ZERO(&rfd);
+        FD_SET(shellfd, &rfd);
+        FD_SET(xfd, &rfd);
+
+        err = select(maxfd+1, &rfd, NULL, NULL, &tv);
+        if (err < 0) {
+            perror("select");
+        }
+
+        if (FD_ISSET(shellfd, &rfd)) {
+            err = read_shell(rbuf, sizeof rbuf);
+            if (err < 0) {
+                perror("read");
+            }
+            //printf("read %d bytes: %s\n", err, rbuf);
+            if (err == 3 && memcmp(rbuf, "\b \b", 3) == 0) {
+                term_backspace(t);
+                term_redraw(t);
+            } else if (err > 0) {
+                term_inserttext(t, rbuf, err);
+                term_redraw(t);
+            }
+        }
+
+        while (XPending(t->display)) {
         XNextEvent(t->display, &e);
         if (XFilterEvent(&e, None)) {
             continue;
@@ -212,6 +253,9 @@ int event_loop(Term *t) {
             switch(sym) {
             case XK_Escape:
                 goto cleanup;
+            case XK_Return:
+                write_shell("\n", 1);
+                break;
             case XK_Left:
                 term_movecursor(t, -1);
                 term_redraw(t);
@@ -245,15 +289,17 @@ int event_loop(Term *t) {
                 term_redraw(t);
                 break;
             case XK_BackSpace:
-                term_backspace(t);
-                term_redraw(t);
+                write_shell("\177", 1);
+                //term_backspace(t);
+                //term_redraw(t);
                 break;
             default:
                 if (n == 1 && buf[0] < 0x20) {
                     break;
                 }
                 //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
-                term_inserttext(t, buf, n);
+                write_shell(buf, n);
+                //term_inserttext(t, buf, n);
                 term_redraw(t);
                 break;
             }
@@ -284,6 +330,7 @@ int event_loop(Term *t) {
 
         default:
             fprintf(stderr, "Ignoring event %d\n", e.type);
+        }
         }
     }
 
@@ -335,7 +382,8 @@ int main() {
 
     term_set_font(&t, "Sans 10");
 
-    char text[256] = "Hello, world! Pokémon. ポケモン. ポケットモンスター";
+    //char text[256] = "Hello, world! Pokémon. ポケモン. ポケットモンスター";
+    char text[256] = "";
     t.text = text;
     t.textlen = strlen(t.text);
     t.textcap = sizeof text;
@@ -345,6 +393,8 @@ int main() {
 
     t.fg = cairo_pattern_create_rgb(0, 0, 0);
     t.bg = cairo_pattern_create_rgb(1, 1, 0xd5/256.0);
+
+    fork_shell();
 
     event_loop(&t);
 
