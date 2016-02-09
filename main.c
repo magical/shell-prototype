@@ -23,6 +23,8 @@ struct Term {
     cairo_t *cr;
     PangoLayout *layout;
 
+    Shell shell;
+
     char *text;
     int textlen;
     int textcap;
@@ -202,14 +204,14 @@ int event_loop(Term *t) {
 
     xfd = ConnectionNumber(t->display);
 
-    maxfd = shellfd;
+    maxfd = t->shell.fd;
     if (xfd > maxfd) {
         maxfd = xfd;
     }
 
     for (;;) {
         FD_ZERO(&rfd);
-        FD_SET(shellfd, &rfd);
+        FD_SET(t->shell.fd, &rfd);
         FD_SET(xfd, &rfd);
 
         err = select(maxfd+1, &rfd, NULL, NULL, &tv);
@@ -217,8 +219,8 @@ int event_loop(Term *t) {
             perror("select");
         }
 
-        if (FD_ISSET(shellfd, &rfd)) {
-            err = read_shell(rbuf, sizeof rbuf);
+        if (FD_ISSET(t->shell.fd, &rfd)) {
+            err = shell_read(&t->shell, rbuf, sizeof rbuf);
             if (err < 0) {
                 perror("read");
             }
@@ -254,7 +256,7 @@ int event_loop(Term *t) {
             case XK_Escape:
                 goto cleanup;
             case XK_Return:
-                write_shell("\n", 1);
+                shell_write(&t->shell, "\n", 1);
                 break;
             case XK_Left:
                 term_movecursor(t, -1);
@@ -289,7 +291,7 @@ int event_loop(Term *t) {
                 term_redraw(t);
                 break;
             case XK_BackSpace:
-                write_shell("\177", 1);
+                shell_write(&t->shell, "\177", 1);
                 //term_backspace(t);
                 //term_redraw(t);
                 break;
@@ -298,7 +300,7 @@ int event_loop(Term *t) {
                     break;
                 }
                 //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
-                write_shell(buf, n);
+                shell_write(&t->shell, buf, n);
                 //term_inserttext(t, buf, n);
                 term_redraw(t);
                 break;
@@ -392,9 +394,10 @@ int main() {
     t.border = 2;
 
     t.fg = cairo_pattern_create_rgb(0, 0, 0);
-    t.bg = cairo_pattern_create_rgb(1, 1, 0xd5/256.0);
+    t.bg = cairo_pattern_create_rgb(1, 1, 0xd5/255.0);
 
-    fork_shell();
+    shell_init(&t.shell);
+    shell_fork(&t.shell);
 
     event_loop(&t);
 

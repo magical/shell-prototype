@@ -1,7 +1,12 @@
+//#include <unistd.h> /* ssize_t */
 
-void fork_shell(void);
-size_t read_shell(char* buf, size_t size);
-size_t write_shell(char* buf, size_t size);
+typedef struct Shell Shell;
+struct Shell {
+    int pid;
+    int fd;
+};
 
-extern int shellfd;
-extern int shellpid;
+void shell_init(Shell* sh);
+void shell_fork(Shell* sh);
+ssize_t shell_read(Shell* sh, char* buf, size_t size);
+ssize_t shell_write(Shell* sh, char* buf, size_t size);

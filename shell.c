@@ -4,14 +4,17 @@
 #include <unistd.h>
 #include <signal.h>
 #include <pty.h>
+#include "shell.h"
 
-static const char* shell = "/usr/lib/plan9/bin/rc";
-static char* shellargs[] = {"rc", 0};
+static const char* shellcmd = "/usr/lib/plan9/bin/rc";
+static       char* shellargs[] = {"rc", 0};
 
-int shellfd;
-int shellpid;
+void shell_init(Shell *sh) {
+    sh->fd = 0;
+    sh->pid = 0;
+}
 
-void exec_shell(void) {
+static void shell_exec(Shell *sh) {
     unsetenv("COLUMNS");
     unsetenv("LINES");
     unsetenv("TERMCAP");
@@ -23,12 +26,13 @@ void exec_shell(void) {
     signal(SIGQUIT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
     signal(SIGALRM, SIG_DFL);
-    execv(shell, shellargs);
+
+    execv(shellcmd, shellargs);
     perror("execvp");
     _exit(1);
 }
 
-void fork_shell(void) {
+void shell_fork(Shell *sh) {
     int mfd;
     int sfd;
     int err;
@@ -51,21 +55,21 @@ void fork_shell(void) {
         dup2(sfd, 1);
         dup2(sfd, 2);
         ioctl(sfd, TIOCSCTTY, NULL);
-        exec_shell();
+        shell_exec(sh);
         break;
     default:
         close(sfd);
-        shellpid = err;
-        shellfd = mfd;
+        sh->pid = err;
+        sh->fd = mfd;
         //signal(SIGCHLD, sigchld);
         break;
     }
 }
 
-ssize_t read_shell(char* buf, size_t size) {
-    return read(shellfd, buf, size);
+ssize_t shell_read(Shell *sh, char* buf, size_t size) {
+    return read(sh->fd, buf, size);
 }
 
-ssize_t write_shell(char* buf, size_t size) {
-    return write(shellfd, buf, size);
+ssize_t shell_write(Shell *sh, char* buf, size_t size) {
+    return write(sh->fd, buf, size);
 }
