@@ -1,8 +1,12 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <locale.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/timerfd.h>
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 #include <X11/Xutil.h>
@@ -22,6 +26,8 @@ struct Term {
     cairo_surface_t *surface;
     cairo_t *cr;
     PangoLayout *layout;
+    bool dirty;
+    bool exiting;
 
     Shell shell;
 
@@ -136,6 +142,8 @@ void term_redraw(Term *t) {
     cairo_pop_group_to_source(t->cr);
     cairo_paint(t->cr);
     cairo_surface_flush(t->surface);
+    XFlush(t->display);
+    t->dirty = false;
 }
 
 void term_movecursor(Term *t, int n) {
@@ -152,6 +160,7 @@ void term_movecursor(Term *t, int n) {
     if (t->cursor_pos + n <= t->textlen) {
         t->cursor_pos += n;
     }
+    t->dirty = true;
 }
 
 void term_inserttext(Term *t, char *buf, size_t len) {
@@ -163,6 +172,7 @@ void term_inserttext(Term *t, char *buf, size_t len) {
     memmove(t->text+i, buf, len);
     t->textlen += len;
     t->cursor_pos += len;
+    t->dirty = true;
 }
 
 void term_backspace(Term *t) {
@@ -178,6 +188,7 @@ void term_backspace(Term *t) {
     }
     t->textlen -= len;
     t->cursor_pos -= len;
+    t->dirty = true;
 }
 
 void term_set_font(Term *t, const char *name) {
@@ -185,158 +196,213 @@ void term_set_font(Term *t, const char *name) {
     desc = pango_font_description_from_string(name);
     pango_layout_set_font_description(t->layout, desc);
     pango_font_description_free(desc);
+    t->dirty = true;
 }
 
-int event_loop(Term *t) {
-    XEvent e;
+void xevent(Term *t, XEvent *xev) {
     KeySym sym;
-    char rbuf[256];
     char buf[32];
-    int xfd;
-    int maxfd;
     int n;
     int index;
     int trailing;
+
+    switch (xev->type) {
+    case ButtonPress:
+        pango_layout_xy_to_index(t->layout,
+            (xev->xbutton.x - t->border)*PANGO_SCALE,
+            (xev->xbutton.y - t->border)*PANGO_SCALE,
+            &index, &trailing);
+        //printf("%d,%d = %d (%d)\n", xev->xbutton.x, xev->xbutton.y, index, trailing);
+        t->cursor_pos = index;
+        t->dirty = true;
+        break;
+
+    case KeyPress:
+        n = Xutf8LookupString(t->ic, &xev->xkey, buf, sizeof buf, &sym, NULL);
+        switch(sym) {
+        case XK_Escape:
+            t->exiting = true;
+            break;
+        case XK_Return:
+            shell_write(&t->shell, "\n", 1);
+            break;
+        case XK_Left:
+            term_movecursor(t, -1);
+            break;
+        case XK_Right:
+            term_movecursor(t, 1);
+            break;
+        case XK_Home:
+            t->cursor_pos = 0;
+            t->dirty = true;
+            break;
+        case XK_End:
+            t->cursor_pos = t->textlen;
+            t->dirty = true;
+            break;
+        case XK_F1:
+            t->cursor_type = (t->cursor_type + 3 - 1) % 3;
+            t->dirty = true;
+            break;
+        case XK_F2:
+            t->cursor_type = (t->cursor_type + 1) % 3;
+            t->dirty = true;
+            break;
+        case XK_F3:
+            term_set_font(t, "Sans 10");
+            break;
+        case XK_F4:
+            term_set_font(t, "Dina 10");
+            break;
+        case XK_BackSpace:
+            shell_write(&t->shell, "\177", 1);
+            //term_backspace(t);
+            break;
+        default:
+            if (n == 1 && buf[0] < 0x20) {
+                break;
+            }
+            //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
+            shell_write(&t->shell, buf, n);
+            //term_inserttext(t, buf, n);
+            break;
+        }
+        break;
+
+    case KeyRelease:
+        break;
+
+    case ClientMessage:
+        if (xev->xclient.message_type == wm_protocols && xev->xclient.data.l[0] == wm_delete_window) {
+            //fprintf(stderr, "got close event\n");
+            t->exiting = true;
+        }
+        break;
+
+    case ConfigureNotify:
+        //fprintf(stderr, "got configure event\n");
+        cairo_xlib_surface_set_size(t->surface,
+            xev->xconfigure.width, xev->xconfigure.height);
+        pango_layout_set_width(t->layout,
+            (xev->xconfigure.width - 2*t->border)*PANGO_SCALE);
+        break;
+
+    case Expose:
+        //fprintf(stderr, "got exposure event\n");
+        term_redraw(t);
+        break;
+
+    default:
+        fprintf(stderr, "Ignoring event %d\n", xev->type);
+    }
+}
+
+int event_loop(Term *t) {
+    XEvent xev;
+    struct timeval tv;
+    struct itimerspec its = {
+        .it_interval = {0, 1e9/30}, // 30 fps
+        .it_value = {0, 1e9/30},
+    };
+    struct timeval now, then;
+    char buf[256];
+    fd_set rfd;
+    int nevents;
+    int timerfd;
+    int xfd;
+    int maxfd;
     int err;
 
-    struct timeval tv = {0, 1000}; // one millisecond
-    fd_set rfd;
-
     xfd = ConnectionNumber(t->display);
+
+    timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
+    if (timerfd < 0) {
+        perror("timerfd");
+        return -1;
+    }
+    err = timerfd_settime(timerfd, 0, &its, NULL);
+    if (err < 0) {
+        perror("timerfd");
+        return -1;
+    }
 
     maxfd = t->shell.fd;
     if (xfd > maxfd) {
         maxfd = xfd;
     }
+    if (timerfd > maxfd) {
+        maxfd = timerfd;
+    }
 
-    for (;;) {
+    t->dirty = true;
+    t->exiting = false;
+    while (!t->exiting) {
         FD_ZERO(&rfd);
         FD_SET(t->shell.fd, &rfd);
         FD_SET(xfd, &rfd);
+        FD_SET(timerfd, &rfd);
+
+        // timeout = 1 millisecond
+        tv.tv_sec = 1;
+        tv.tv_usec = 1000;
 
         err = select(maxfd+1, &rfd, NULL, NULL, &tv);
         if (err < 0) {
             perror("select");
         }
 
+        if (err == 0) {
+            printf("timeout\n");
+            term_redraw(t);
+            continue;
+        }
+
+        nevents = err;
+        gettimeofday(&then, NULL);
+
         if (FD_ISSET(t->shell.fd, &rfd)) {
-            err = shell_read(&t->shell, rbuf, sizeof rbuf);
+            char *p;
+            err = shell_read(&t->shell, buf, sizeof buf);
             if (err < 0) {
                 perror("read");
             }
-            //printf("read %d bytes: %s\n", err, rbuf);
-            if (err == 3 && memcmp(rbuf, "\b \b", 3) == 0) {
+            //printf("read %d bytes: %s\n", err, buf);
+            p = buf;
+            while (err >= 3 && memcmp(p, "\b \b", 3) == 0) {
                 term_backspace(t);
-                term_redraw(t);
-            } else if (err > 0) {
-                term_inserttext(t, rbuf, err);
-                term_redraw(t);
+                p += 3;
+                err -= 3;
+            }
+            if (err > 0) {
+                term_inserttext(t, p, err);
             }
         }
 
-        while (XPending(t->display)) {
-        XNextEvent(t->display, &e);
-        if (XFilterEvent(&e, None)) {
-            continue;
-        }
-        switch (e.type) {
-        case ButtonPress:
-            pango_layout_xy_to_index(t->layout,
-                (e.xbutton.x-t->border)*PANGO_SCALE,
-                (e.xbutton.y-t->border)*PANGO_SCALE,
-                &index, &trailing);
-            //printf("%d,%d = %d (%d)\n", e.xbutton.x, e.xbutton.y, index, trailing);
-            t->cursor_pos = index;
-            term_redraw(t);
-            break;
-
-        case KeyPress:
-            n = Xutf8LookupString(t->ic, &e.xkey, buf, sizeof buf, &sym, NULL);
-            switch(sym) {
-            case XK_Escape:
-                goto cleanup;
-            case XK_Return:
-                shell_write(&t->shell, "\n", 1);
-                break;
-            case XK_Left:
-                term_movecursor(t, -1);
-                term_redraw(t);
-                break;
-            case XK_Right:
-                term_movecursor(t, 1);
-                term_redraw(t);
-                break;
-            case XK_Home:
-                t->cursor_pos = 0;
-                term_redraw(t);
-                break;
-            case XK_End:
-                t->cursor_pos = t->textlen;
-                term_redraw(t);
-                break;
-            case XK_F1:
-                t->cursor_type = (t->cursor_type + 3 - 1) % 3;
-                term_redraw(t);
-                break;
-            case XK_F2:
-                t->cursor_type = (t->cursor_type + 1) % 3;
-                term_redraw(t);
-                break;
-            case XK_F3:
-                term_set_font(t, "Sans 10");
-                term_redraw(t);
-                break;
-            case XK_F4:
-                term_set_font(t, "Dina 10");
-                term_redraw(t);
-                break;
-            case XK_BackSpace:
-                shell_write(&t->shell, "\177", 1);
-                //term_backspace(t);
-                //term_redraw(t);
-                break;
-            default:
-                if (n == 1 && buf[0] < 0x20) {
-                    break;
+        if (FD_ISSET(xfd, &rfd)) {
+            while (XPending(t->display)) {
+                XNextEvent(t->display, &xev);
+                if (XFilterEvent(&xev, None)) {
+                    continue;
                 }
-                //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
-                shell_write(&t->shell, buf, n);
-                //term_inserttext(t, buf, n);
+                xevent(t, &xev);
+            }
+        }
+
+        if (FD_ISSET(timerfd, &rfd)) {
+            read(timerfd, buf, sizeof buf);
+            if (t->dirty) {
+                printf("timer redraw\n");
                 term_redraw(t);
-                break;
+            } else {
+                //term_redraw(t);
             }
-            break;
-
-        case KeyRelease:
-            break;
-
-        case ClientMessage:
-            if (e.xclient.message_type == wm_protocols && e.xclient.data.l[0] == wm_delete_window) {
-                //fprintf(stderr, "got close event\n");
-                goto cleanup;
-            }
-            break;
-
-        case ConfigureNotify:
-            //fprintf(stderr, "got configure event\n");
-            cairo_xlib_surface_set_size(t->surface,
-                e.xconfigure.width, e.xconfigure.height);
-            pango_layout_set_width(t->layout,
-                (e.xconfigure.width - 2*t->border)*PANGO_SCALE);
-            break;
-
-        case Expose:
-            //fprintf(stderr, "got exposure event\n");
-            term_redraw(t);
-            break;
-
-        default:
-            fprintf(stderr, "Ignoring event %d\n", e.type);
         }
-        }
+
+        gettimeofday(&now, NULL);
+        int diff = (now.tv_sec - then.tv_sec)*1000000 + (now.tv_usec - then.tv_usec);
+        printf("handled %d events in %d µ\n", nevents, diff);
     }
 
-cleanup:
     return 0;
 }
 
