@@ -22,29 +22,37 @@ Atom wm_delete_window;
 
 typedef struct Term Term;
 struct Term {
+    // X stuff
     Display *display;
     XIM im;
     XIC ic;
+
+    // Cairo stuff
     cairo_surface_t *surface;
     cairo_t *cr;
+    cairo_pattern_t *fg;
+    cairo_pattern_t *bg;
     PangoLayout *layout;
+    int border;
     bool dirty;
+
+    // shell
+    Shell shell;
     bool exiting;
 
-    Shell shell;
+    // cursor position and shape
+    int cursor_pos;
+    int cursor_type;
 
+    // edit buffer
     char *text;
     int textlen;
     int textcap;
 
-    int cursor_pos;
-    int cursor_type;
-    int border;
-
-    cairo_pattern_t *fg;
-    cairo_pattern_t *bg;
-
-    char *scrollback;
+    // scrollback buffer
+    char *hist;
+    int histlen;
+    int histcap;
 };
 
 cairo_surface_t *cairo_create_x11_surface(Display *display, int x, int y) {
@@ -467,7 +475,7 @@ int main() {
     t.textlen = strlen(t.text);
     t.textcap = sizeof text;
     t.cursor_pos = 0;
-    t.cursor_type = 0;
+    t.cursor_type = 2;
     t.border = 2;
 
     t.fg = cairo_pattern_create_rgb(0, 0, 0);
