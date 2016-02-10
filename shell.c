@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <pty.h>
+#include <sys/wait.h>
 #include "shell.h"
 
 static const char* shellcmd = "/usr/lib/plan9/bin/rc";
@@ -14,12 +15,27 @@ void shell_init(Shell *sh) {
     sh->pid = 0;
 }
 
+static void sigchld() {
+    int status;
+    pid_t pid;
+    pid = waitpid(WAIT_ANY, &status, WNOHANG);
+    if (pid < 0) {
+        perror("waitpid");
+    }
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+        printf("shell exited with status %d\n", WEXITSTATUS(status));
+    }
+    exit(0);
+}
+
 static void shell_exec(Shell *sh) {
     unsetenv("COLUMNS");
     unsetenv("LINES");
     unsetenv("TERMCAP");
     setenv("TERM", "magicalterm", 1);
 
+    // Do we need to reset all these signals?
     signal(SIGCHLD, SIG_DFL);
     signal(SIGHUP, SIG_DFL);
     signal(SIGINT, SIG_DFL);
@@ -61,7 +77,7 @@ void shell_fork(Shell *sh) {
         close(sfd);
         sh->pid = err;
         sh->fd = mfd;
-        //signal(SIGCHLD, sigchld);
+        signal(SIGCHLD, sigchld);
         break;
     }
 }

@@ -342,9 +342,10 @@ int event_loop(Term *t) {
         FD_SET(xfd, &rfd);
         FD_SET(timerfd, &rfd);
 
-        // timeout = 1 millisecond
+        // timeout = 1 second
+        // because i feel like we shouldn't block forever
         tv.tv_sec = 1;
-        tv.tv_usec = 1000;
+        tv.tv_usec = 0;
 
         err = select(maxfd+1, &rfd, NULL, NULL, &tv);
         if (err < 0) {
