@@ -43,10 +43,13 @@ struct Term {
     int cursor_pos;
     int cursor_type;
 
+    // each command should have its
+    // own edit and scrollback buffers
+
     // edit buffer
-    char *text;
-    int textlen;
-    int textcap;
+    char *edit;
+    int editlen;
+    int editcap;
 
     // scrollback buffer
     char *hist;
@@ -99,12 +102,12 @@ void draw_text(cairo_t *cr, PangoLayout *layout, cairo_pattern_t *fg, const char
     pango_cairo_show_layout(cr, layout);
 }
 
-void draw_cursor(Term *t) {
+void draw_cursor(Term *t, int x, int y) {
     PangoRectangle rect;
     pango_layout_index_to_pos(t->layout, t->cursor_pos, &rect);
     double d = PANGO_SCALE;
-    rect.x += t->border*d;
-    rect.y += t->border*d;
+    rect.x += x*d;
+    rect.y += y*d;
     cairo_set_source(t->cr, t->fg);
     switch (t->cursor_type) {
     default:
@@ -135,6 +138,7 @@ void draw_cursor(Term *t) {
 }
 
 void term_redraw(Term *t) {
+    PangoRectangle rect;
     cairo_push_group(t->cr);
 
     // Draw background
@@ -143,10 +147,13 @@ void term_redraw(Term *t) {
 
     // Draw text
     cairo_move_to(t->cr, t->border, t->border);
-    draw_text(t->cr, t->layout, t->fg, t->text, t->textlen);
+    draw_text(t->cr, t->layout, t->fg, t->hist, t->histlen);
+    pango_layout_get_pixel_extents(t->layout, NULL, &rect);
+    cairo_move_to(t->cr, t->border, rect.y+rect.height);
+    draw_text(t->cr, t->layout, t->fg, t->edit, t->editlen);
 
     // Draw cursor
-    draw_cursor(t);
+    draw_cursor(t, t->border, rect.y+rect.height);
 
     cairo_pop_group_to_source(t->cr);
     cairo_paint(t->cr);
@@ -157,29 +164,54 @@ void term_redraw(Term *t) {
 
 void term_movecursor(Term *t, int n) {
     if (n > 0) {
-        n = utf8decode(t->text+t->cursor_pos, t->textlen-t->cursor_pos, NULL);
+        n = utf8decode(t->edit+t->cursor_pos, t->editlen-t->cursor_pos, NULL);
         //printf("%.*s\n", n, t->text+t->cursor_pos);
     } else if (n < 0) {
-        n = -utf8decodelast(t->text, t->cursor_pos, NULL);
-        //printf("%.*s\n", -n, t->text+t->cursor_pos+n);
+        n = -utf8decodelast(t->edit, t->cursor_pos, NULL);
+        //printf("%.*s\n", -n, t->edit+t->cursor_pos+n);
     } else {
         return;
     }
     if (t->cursor_pos + n >= 0)
-    if (t->cursor_pos + n <= t->textlen) {
+    if (t->cursor_pos + n <= t->editlen) {
         t->cursor_pos += n;
     }
     t->dirty = true;
 }
 
+void term_appendhist(Term *t, char *buf, size_t len) {
+    if (t->histcap - t->histlen < len) {
+        void *v;
+        int newcap;
+        newcap = t->histcap * 2;
+        if (newcap < len) {
+            newcap = len;
+        }
+        if (newcap < t->histcap) {
+            printf("overflow\n");
+            exit(1);
+        }
+        v = realloc(t->hist, newcap);
+        if (v == NULL) {
+            perror("realloc");
+            exit(1);
+        }
+        t->hist = v;
+        t->histcap = newcap;
+    }
+    memmove(t->hist+t->histlen, buf, len);
+    t->histlen += len;
+    t->dirty = true;
+}
+
 void term_inserttext(Term *t, char *buf, size_t len) {
     int i = t->cursor_pos;
-    if (t->textcap - t->textlen < len) {
+    if (t->editcap - t->editlen < len) {
         return;
     }
-    memmove(t->text+i+len, t->text+i, t->textlen-i);
-    memmove(t->text+i, buf, len);
-    t->textlen += len;
+    memmove(t->edit+i+len, t->edit+i, t->editlen-i);
+    memmove(t->edit+i, buf, len);
+    t->editlen += len;
     t->cursor_pos += len;
     t->dirty = true;
 }
@@ -188,14 +220,14 @@ void term_backspace(Term *t) {
     int i = t->cursor_pos;
     int len;
     int32_t r;
-    len = utf8decodelast(t->text, i, &r);
+    len = utf8decodelast(t->edit, i, &r);
     if (len == 0) {
         return;
     }
-    if (i < t->textlen) {
-        memmove(t->text+i-len, t->text+i, t->textlen-i);
+    if (i < t->editlen) {
+        memmove(t->edit+i-len, t->edit+i, t->editlen-i);
     }
-    t->textlen -= len;
+    t->editlen -= len;
     t->cursor_pos -= len;
     t->dirty = true;
 }
@@ -233,7 +265,10 @@ void xevent(Term *t, XEvent *xev) {
             t->exiting = true;
             break;
         case XK_Return:
+            shell_write(&t->shell, t->edit, t->editlen);
             shell_write(&t->shell, "\n", 1);
+            t->editlen = 0;
+            t->cursor_pos = 0;
             break;
         case XK_Left:
             term_movecursor(t, -1);
@@ -246,7 +281,7 @@ void xevent(Term *t, XEvent *xev) {
             t->dirty = true;
             break;
         case XK_End:
-            t->cursor_pos = t->textlen;
+            t->cursor_pos = t->editlen;
             t->dirty = true;
             break;
         case XK_F1:
@@ -264,16 +299,14 @@ void xevent(Term *t, XEvent *xev) {
             term_set_font(t, "Dina 10");
             break;
         case XK_BackSpace:
-            shell_write(&t->shell, "\177", 1);
-            //term_backspace(t);
+            term_backspace(t);
             break;
         default:
             if (n == 1 && buf[0] < 0x20) {
                 break;
             }
             //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
-            shell_write(&t->shell, buf, n);
-            //term_inserttext(t, buf, n);
+            term_inserttext(t, buf, n);
             break;
         }
         break;
@@ -376,19 +409,23 @@ int event_loop(Term *t) {
 
         if (FD_ISSET(t->shell.fd, &rfd)) {
             char *p;
+            //int i;
             err = shell_read(&t->shell, buf, sizeof buf);
             if (err < 0) {
                 perror("read");
             }
             //printf("read %d bytes: %s\n", err, buf);
             p = buf;
-            while (err >= 3 && memcmp(p, "\b \b", 3) == 0) {
-                term_backspace(t);
-                p += 3;
-                err -= 3;
+            /*
+            for (i = t->echo; i < t->editlen && err > 0; err--) {
+                if (*p == t->edit[i]) {
+                    p++;
+                }
             }
+            t->echo = i;
+            */
             if (err > 0) {
-                term_inserttext(t, p, err);
+                term_appendhist(t, p, err);
             }
         }
 
@@ -470,12 +507,16 @@ int main() {
 
     //char text[256] = "Hello, world! Pokémon. ポケモン. ポケットモンスター";
     char text[256] = "";
-    t.text = text;
-    t.textlen = strlen(t.text);
-    t.textcap = sizeof text;
+    t.edit = text;
+    t.editlen = strlen(t.edit);
+    t.editcap = sizeof text;
     t.cursor_pos = 0;
     t.cursor_type = 2;
     t.border = 2;
+
+    t.hist = malloc(10000);
+    t.histlen = 0;
+    t.histcap = 10000;
 
     t.fg = cairo_pattern_create_rgb(0, 0, 0);
     t.bg = cairo_pattern_create_rgb(1, 1, 0xd5/255.0);
