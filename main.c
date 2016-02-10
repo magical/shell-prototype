@@ -15,6 +15,8 @@
 #include "utf8.h"
 #include "shell.h"
 
+int debug;
+
 Atom wm_protocols;
 Atom wm_delete_window;
 
@@ -353,13 +355,17 @@ int event_loop(Term *t) {
         }
 
         if (err == 0) {
-            printf("timeout\n");
+            if (debug) {
+                printf("timeout\n");
+            }
             term_redraw(t);
             continue;
         }
 
         nevents = err;
-        gettimeofday(&then, NULL);
+        if (debug) {
+            gettimeofday(&then, NULL);
+        }
 
         if (FD_ISSET(t->shell.fd, &rfd)) {
             char *p;
@@ -392,16 +398,20 @@ int event_loop(Term *t) {
         if (FD_ISSET(timerfd, &rfd)) {
             read(timerfd, buf, sizeof buf);
             if (t->dirty) {
-                printf("timer redraw\n");
+                if (debug) {
+                    printf("timer redraw\n");
+                }
                 term_redraw(t);
             } else {
                 //term_redraw(t);
             }
         }
 
-        gettimeofday(&now, NULL);
-        int diff = (now.tv_sec - then.tv_sec)*1000000 + (now.tv_usec - then.tv_usec);
-        printf("handled %d events in %d µ\n", nevents, diff);
+        if (debug) {
+            gettimeofday(&now, NULL);
+            int diff = (now.tv_sec - then.tv_sec)*1000000 + (now.tv_usec - then.tv_usec);
+            printf("handled %d events in %d µ\n", nevents, diff);
+        }
     }
 
     return 0;
