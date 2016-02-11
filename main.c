@@ -189,7 +189,7 @@ void term_appendhist(Term *t, char *buf, size_t len) {
         void *v;
         int newcap;
         newcap = t->histcap * 2;
-        if (newcap < len) {
+        if (newcap - t->histlen < len) {
             newcap = t->histlen + len;
         }
         if (newcap < t->histcap) {
