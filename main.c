@@ -43,6 +43,9 @@ struct Term {
     int cursor_pos;
     int cursor_type;
 
+    int inputx;
+    int inputy;
+
     // each command should have its
     // own edit and scrollback buffers
 
@@ -149,7 +152,9 @@ void term_redraw(Term *t) {
     cairo_move_to(t->cr, t->border, t->border);
     draw_text(t->cr, t->layout, t->fg, t->hist, t->histlen);
     pango_layout_get_pixel_extents(t->layout, NULL, &rect);
-    cairo_move_to(t->cr, t->border, rect.y+rect.height);
+    t->inputx = t->border;
+    t->inputy = rect.y + rect.height;
+    cairo_move_to(t->cr, t->inputx, t->inputy);
     draw_text(t->cr, t->layout, t->fg, t->edit, t->editlen);
 
     // Draw cursor
@@ -185,7 +190,7 @@ void term_appendhist(Term *t, char *buf, size_t len) {
         int newcap;
         newcap = t->histcap * 2;
         if (newcap < len) {
-            newcap = len;
+            newcap = t->histlen + len;
         }
         if (newcap < t->histcap) {
             printf("overflow\n");
@@ -250,8 +255,8 @@ void xevent(Term *t, XEvent *xev) {
     switch (xev->type) {
     case ButtonPress:
         pango_layout_xy_to_index(t->layout,
-            (xev->xbutton.x - t->border)*PANGO_SCALE,
-            (xev->xbutton.y - t->border)*PANGO_SCALE,
+            (xev->xbutton.x - t->inputx)*PANGO_SCALE,
+            (xev->xbutton.y - t->inputy)*PANGO_SCALE,
             &index, &trailing);
         //printf("%d,%d = %d (%d)\n", xev->xbutton.x, xev->xbutton.y, index, trailing);
         t->cursor_pos = index;
@@ -465,8 +470,6 @@ int event_loop(Term *t) {
                     printf("timer redraw\n");
                 }
                 term_redraw(t);
-            } else {
-                //term_redraw(t);
             }
         }
 
@@ -533,10 +536,12 @@ int main() {
     t.cursor_pos = 0;
     t.cursor_type = 2;
     t.border = 2;
+    t.inputx = t.border;
+    t.inputy = t.border;
 
-    t.hist = malloc(10000);
+    t.hist = NULL;
     t.histlen = 0;
-    t.histcap = 10000;
+    t.histcap = 0;
 
     t.fg = cairo_pattern_create_rgb(0, 0, 0);
     t.bg = cairo_pattern_create_rgb(1, 1, 0xd5/255.0);
