@@ -342,7 +342,9 @@ void xevent(Term *t, XEvent *xev) {
         break;
 
     case ConfigureNotify:
-        //fprintf(stderr, "got configure event\n");
+        if (debug) {
+            fprintf(stderr, "got configure event\n");
+        }
         cairo_xlib_surface_set_size(t->surface,
             xev->xconfigure.width, xev->xconfigure.height);
         pango_layout_set_width(t->layout,
@@ -442,6 +444,9 @@ int event_loop(Term *t) {
         }
 
         if (FD_ISSET(t->shell.fd, &rfd)) {
+            if (debug) {
+                printf("shell\n");
+            }
             err = shell_read(&t->shell, buf, sizeof buf);
             if (err < 0) {
                 perror("read shell");
@@ -454,6 +459,9 @@ int event_loop(Term *t) {
         }
 
         if (FD_ISSET(xfd, &rfd)) {
+            if (debug) {
+                printf("xevent\n");
+            }
             while (XPending(t->display)) {
                 XNextEvent(t->display, &xev);
                 if (XFilterEvent(&xev, None)) {
@@ -552,6 +560,8 @@ int main() {
     }
 
     event_loop(&t);
+
+    shell_exit(&t.shell);
 
     cairo_pattern_destroy(t.fg);
     cairo_pattern_destroy(t.bg);

@@ -16,6 +16,7 @@ struct Shell {
 
 int shell_init(Shell* sh);
 void shell_run(Shell *sh, char *cmdline);
+void shell_exit(Shell *sh);
 void shell_reap(Shell *sh);
 bool shell_running(Shell *sh);
 ssize_t shell_read(Shell* sh, char* buf, size_t size);

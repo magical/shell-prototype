@@ -64,6 +64,14 @@ void shell_reap(Shell *sh) {
     }
 }
 
+void shell_exit(Shell *sh) {
+    if (sh->pid != 0) {
+        kill(-sh->pid, SIGTERM);
+    }
+    close(sh->fd);
+    close(sh->sfd);
+}
+
 bool shell_running(Shell *sh) {
     return sh->pid != 0;
 }
