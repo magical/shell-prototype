@@ -265,8 +265,18 @@ void xevent(Term *t, XEvent *xev) {
             t->exiting = true;
             break;
         case XK_Return:
-            shell_write(&t->shell, t->edit, t->editlen);
-            shell_write(&t->shell, "\n", 1);
+            if (shell_running(&t->shell)) {
+                shell_write(&t->shell, t->edit, t->editlen);
+                shell_write(&t->shell, "\n", 1);
+            } else {
+                term_appendhist(t, "% ", 2);
+                term_appendhist(t, t->edit, t->editlen);
+                term_appendhist(t, "\n", 1);
+                if (t->editlen < t->editcap) {
+                    t->edit[t->editlen] = '\0';
+                    shell_run(&t->shell, t->edit);
+                }
+            }
             t->editlen = 0;
             t->cursor_pos = 0;
             break;
@@ -380,12 +390,16 @@ int event_loop(Term *t) {
     if (timerfd > maxfd) {
         maxfd = timerfd;
     }
+    if (selfpipe.r > maxfd) {
+        maxfd = selfpipe.r;
+    }
 
     t->dirty = true;
     t->exiting = false;
     while (!t->exiting) {
         FD_ZERO(&rfd);
         FD_SET(t->shell.fd, &rfd);
+        FD_SET(selfpipe.r, &rfd);
         FD_SET(xfd, &rfd);
         FD_SET(timerfd, &rfd);
 
@@ -397,6 +411,7 @@ int event_loop(Term *t) {
         err = select(maxfd+1, &rfd, NULL, NULL, &tv);
         if (err < 0) {
             perror("select");
+            continue;
         }
 
         if (err == 0) {
@@ -412,25 +427,24 @@ int event_loop(Term *t) {
             gettimeofday(&then, NULL);
         }
 
+        if (FD_ISSET(selfpipe.r, &rfd)) {
+            err = read(selfpipe.r, buf, 1);
+            if (err < 0) {
+                perror("read selfpipe");
+                continue;
+            }
+            shell_reap(&t->shell);
+        }
+
         if (FD_ISSET(t->shell.fd, &rfd)) {
-            char *p;
-            //int i;
             err = shell_read(&t->shell, buf, sizeof buf);
             if (err < 0) {
-                perror("read");
+                perror("read shell");
+                continue;
             }
             //printf("read %d bytes: %s\n", err, buf);
-            p = buf;
-            /*
-            for (i = t->echo; i < t->editlen && err > 0; err--) {
-                if (*p == t->edit[i]) {
-                    p++;
-                }
-            }
-            t->echo = i;
-            */
             if (err > 0) {
-                term_appendhist(t, p, err);
+                term_appendhist(t, buf, err);
             }
         }
 
@@ -468,6 +482,7 @@ int event_loop(Term *t) {
 
 int main() {
     Term t;
+    int err;
 
     setlocale(LC_ALL, "");
     t.display = XOpenDisplay(NULL);
@@ -526,8 +541,10 @@ int main() {
     t.fg = cairo_pattern_create_rgb(0, 0, 0);
     t.bg = cairo_pattern_create_rgb(1, 1, 0xd5/255.0);
 
-    shell_init(&t.shell);
-    shell_fork(&t.shell);
+    err = shell_init(&t.shell);
+    if (err < 0) {
+        exit(1);
+    }
 
     event_loop(&t);
 
