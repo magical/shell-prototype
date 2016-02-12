@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <locale.h>
+#include <errno.h>
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
@@ -415,9 +416,12 @@ int event_loop(Term *t) {
         tv.tv_sec = 1;
         tv.tv_usec = 0;
 
+        errno = 0;
         err = select(maxfd+1, &rfd, NULL, NULL, &tv);
         if (err < 0) {
-            perror("select");
+            if (errno != EINTR) {
+                perror("select");
+            }
             continue;
         }
 
