@@ -419,10 +419,13 @@ int event_loop(Term *t) {
         errno = 0;
         err = select(maxfd+1, &rfd, NULL, NULL, &tv);
         if (err < 0) {
-            if (errno != EINTR) {
+            switch(errno) {
+            case EINTR:
+                continue;
+            default:
                 perror("select");
+                return;
             }
-            continue;
         }
 
         if (err == 0) {
