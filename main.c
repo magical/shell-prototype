@@ -319,6 +319,10 @@ void xevent(Term *t, XEvent *xev) {
             break;
         default:
             if (n == 1 && buf[0] < 0x20) {
+                if (buf[0] == 4 && !shell_running(&t->shell)) {
+                    t->exiting = true;
+                    break;
+                }
                 printf("keysym %ld, state=%d\n", sym, xev->xkey.state);
                 shell_write(&t->shell, t->edit, t->editlen);
                 shell_write(&t->shell, buf, 1);
