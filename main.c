@@ -20,6 +20,9 @@ int debug;
 Atom wm_protocols;
 Atom wm_delete_window;
 
+const struct timeval select_timeout = {1, 0}; // 1s
+const struct timespec redraw_interval = {0, 1e9/30}; // 30 fps
+
 typedef struct Term Term;
 struct Term {
     // X stuff
@@ -378,7 +381,7 @@ void xevent(Term *t, XEvent *xev) {
         break;
 
     case ClientMessage:
-        if (xev->xclient.message_type == wm_protocols && xev->xclient.data.l[0] == wm_delete_window) {
+        if (xev->xclient.message_type == wm_protocols && (Atom)xev->xclient.data.l[0] == wm_delete_window) {
             //fprintf(stderr, "got close event\n");
             t->exiting = true;
         }
@@ -403,12 +406,11 @@ void xevent(Term *t, XEvent *xev) {
 
 int event_loop(Term *t) {
     XEvent xev;
-    struct timeval tv;
     struct itimerspec its = {
-        .it_interval = {0, 1e9/30}, // 30 fps
-        .it_value = {0, 1e9/30},
+        .it_interval = redraw_interval,
+        .it_value = redraw_interval,
     };
-    struct timeval now, then;
+    struct timeval tv, now, then;
     char buf[256];
     fd_set rfd;
     int nevents;
@@ -417,7 +419,7 @@ int event_loop(Term *t) {
     int maxfd;
     int err;
 
-    xfd = ConnectionNumber(t->display);
+    xfd = XConnectionNumber(t->display);
 
     timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
     if (timerfd < 0) {
@@ -452,8 +454,7 @@ int event_loop(Term *t) {
 
         // timeout = 1 second
         // because i feel like we shouldn't block forever
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
+        tv = select_timeout;
 
         errno = 0;
         err = select(maxfd+1, &rfd, NULL, NULL, &tv);

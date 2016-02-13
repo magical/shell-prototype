@@ -1,6 +1,5 @@
 //#include <stdbool.h> /* bool */
 //#include <unistd.h> /* ssize_t, pid_t */
-//#include <sys/resource.h> /* struct rusage */
 
 struct selfpipe {
     int r, w;
