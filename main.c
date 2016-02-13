@@ -428,7 +428,7 @@ int event_loop(Term *t) {
                 continue;
             default:
                 perror("select");
-                return;
+                return -1;
             }
         }
 
