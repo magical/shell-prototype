@@ -40,15 +40,14 @@ struct Term {
     Shell shell;
     bool exiting;
 
-    // cursor position and shape
-    int cursor_pos;
-    int cursor_type;
-
-    int inputx;
+    int cursor_pos; // cursor position in bytes
+    int cursor_type; // cursor shape
+    double charwidth;
+    double charheight;
+    int inputx; // where the input is on the screen
     int inputy;
-
-    // each command should have its
-    // own edit and scrollback buffers
+    int scroll; // scrollback y position in pixels
+    int height; // height of window
 
     // edit buffer
     char *edit;
@@ -102,40 +101,46 @@ void draw_text(cairo_t *cr, PangoLayout *layout, cairo_pattern_t *fg, const char
     cairo_set_source(cr, fg);
     pango_layout_set_text(layout, text, len);
     pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_cairo_update_layout(cr, layout);
     pango_cairo_show_layout(cr, layout);
 }
 
 void draw_cursor(Term *t, int x, int y) {
     PangoRectangle rect;
     pango_layout_index_to_pos(t->layout, t->cursor_pos, &rect);
-    double d = PANGO_SCALE;
-    rect.x += x*d;
-    rect.y += y*d;
+    pango_extents_to_pixels(&rect, NULL);
+    rect.x += x;
+    rect.y += y - t->scroll;
     cairo_set_source(t->cr, t->fg);
     switch (t->cursor_type) {
     default:
+    case 0:
         // solid box
-        cairo_rectangle(t->cr, rect.x/d, rect.y/d, rect.width/d, rect.height/d);
+        if (rect.width == 0) {
+            rect.width = t->charwidth;
+        }
+        cairo_rectangle(t->cr, rect.x, rect.y, rect.width, rect.height);
         cairo_clip(t->cr);
         cairo_paint(t->cr);
+
+        // redraw glyph
         cairo_set_source(t->cr, t->bg);
-        cairo_rectangle(t->cr, rect.x/d, rect.y/d, rect.width/d, rect.height/d);
+        cairo_rectangle(t->cr, rect.x, rect.y, rect.width, rect.height);
         cairo_clip(t->cr);
-        cairo_move_to(t->cr, t->border, t->border);
+        cairo_move_to(t->cr, x, y - t->scroll);
+        // assume we just rendered the text
         pango_cairo_show_layout(t->cr, t->layout);
         break;
     case 1:
         // box outline
-        cairo_rectangle(t->cr, rect.x/d+.5, rect.y/d+.5, rect.width/d-1, rect.height/d-1);
+        cairo_rectangle(t->cr, rect.x+0.5, rect.y+0.5, rect.width-1, rect.height-1);
         cairo_set_line_width(t->cr, 1);
         cairo_stroke(t->cr);
         break;
     case 2:
         // vertical line
-        cairo_rectangle(t->cr, rect.x/d - 1, rect.y/d, 1, rect.height/d);
-        cairo_rectangle(t->cr, rect.x/d - 2, rect.y/d, 3, 3);
-        cairo_rectangle(t->cr, rect.x/d - 2, (rect.y + rect.height)/d - 3, 3, 3);
+        cairo_rectangle(t->cr, rect.x - 1, rect.y, 1, rect.height);
+        cairo_rectangle(t->cr, rect.x - 2, rect.y, 3, 3);
+        cairo_rectangle(t->cr, rect.x - 2, rect.y + rect.height - 3, 3, 3);
         cairo_fill(t->cr);
         break;
     }
@@ -149,13 +154,15 @@ void term_redraw(Term *t) {
     cairo_set_source(t->cr, t->bg);
     cairo_paint(t->cr);
 
-    // Draw text
-    cairo_move_to(t->cr, t->border, t->border);
+    // Draw scrollback
+    cairo_move_to(t->cr, t->border, t->border - t->scroll);
     draw_text(t->cr, t->layout, t->fg, t->hist, t->histlen);
+
+    // Draw input (below scrollback)
     pango_layout_get_pixel_extents(t->layout, NULL, &rect);
     t->inputx = t->border;
     t->inputy = rect.y + rect.height;
-    cairo_move_to(t->cr, t->inputx, t->inputy);
+    cairo_move_to(t->cr, t->inputx, t->inputy - t->scroll);
     draw_text(t->cr, t->layout, t->fg, t->edit, t->editlen);
 
     // Draw cursor
@@ -166,6 +173,21 @@ void term_redraw(Term *t) {
     cairo_surface_flush(t->surface);
     XFlush(t->display);
     t->dirty = false;
+}
+
+void term_resize(Term *t, int width, int height) {
+    cairo_xlib_surface_set_size(t->surface, width, height);
+    pango_layout_set_width(t->layout, (width - 2*t->border)*PANGO_SCALE);
+    t->height = height;
+    t->dirty = true;
+}
+
+void term_scroll(Term *t, int dir) {
+    t->scroll += (t->height - 10) * dir;
+    if (t->scroll < 0) {
+        t->scroll = 0;
+    }
+    t->dirty = true;
 }
 
 void term_movecursor(Term *t, int n) {
@@ -240,9 +262,19 @@ void term_backspace(Term *t) {
 
 void term_set_font(Term *t, const char *name) {
     PangoFontDescription *desc;
+    PangoFontMetrics *metrics;
+    int width, height;
     desc = pango_font_description_from_string(name);
+    metrics = pango_context_get_metrics(
+        pango_layout_get_context(t->layout), desc, NULL);
     pango_layout_set_font_description(t->layout, desc);
+    width = pango_font_metrics_get_approximate_char_width(metrics);
+    height = pango_font_metrics_get_ascent(metrics) +
+                    pango_font_metrics_get_descent(metrics);
+    pango_font_metrics_unref(metrics);
     pango_font_description_free(desc);
+    t->charwidth = pango_units_to_double(width);
+    t->charheight = pango_units_to_double(height);
     t->dirty = true;
 }
 
@@ -300,6 +332,12 @@ void xevent(Term *t, XEvent *xev) {
             t->cursor_pos = t->editlen;
             t->dirty = true;
             break;
+        case XK_Page_Up:
+            term_scroll(t, -1);
+            break;
+        case XK_Page_Down:
+            term_scroll(t, +1);
+            break;
         case XK_F1:
             t->cursor_type = (t->cursor_type + 3 - 1) % 3;
             t->dirty = true;
@@ -350,10 +388,7 @@ void xevent(Term *t, XEvent *xev) {
         if (debug) {
             fprintf(stderr, "got configure event\n");
         }
-        cairo_xlib_surface_set_size(t->surface,
-            xev->xconfigure.width, xev->xconfigure.height);
-        pango_layout_set_width(t->layout,
-            (xev->xconfigure.width - 2*t->border)*PANGO_SCALE);
+        term_resize(t, xev->xconfigure.width, xev->xconfigure.height);
         break;
 
     case Expose:
@@ -553,10 +588,11 @@ int main() {
     t.editlen = strlen(t.edit);
     t.editcap = sizeof text;
     t.cursor_pos = 0;
-    t.cursor_type = 2;
+    t.cursor_type = 0;
     t.border = 2;
     t.inputx = t.border;
     t.inputy = t.border;
+    t.scroll = 0;
 
     t.hist = NULL;
     t.histlen = 0;
@@ -573,7 +609,6 @@ int main() {
     event_loop(&t);
 
     shell_exit(&t.shell);
-
     cairo_pattern_destroy(t.fg);
     cairo_pattern_destroy(t.bg);
     g_object_unref(t.layout);
