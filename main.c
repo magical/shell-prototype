@@ -281,6 +281,14 @@ void term_set_font(Term *t, const char *name) {
     t->dirty = true;
 }
 
+void term_swap_colors(Term *t) {
+    cairo_pattern_t *fg = t->fg;
+    cairo_pattern_t *bg = t->bg;
+    t->fg = bg;
+    t->bg = fg;
+    t->dirty = true;
+}
+
 void xevent(Term *t, XEvent *xev) {
     KeySym sym;
     char buf[32];
@@ -354,6 +362,9 @@ void xevent(Term *t, XEvent *xev) {
             break;
         case XK_F4:
             term_set_font(t, "Dina 10");
+            break;
+        case XK_F5:
+            term_swap_colors(t);
             break;
         case XK_BackSpace:
             term_backspace(t);
