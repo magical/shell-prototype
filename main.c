@@ -454,7 +454,6 @@ int event_loop(Term *t) {
         maxfd = selfpipe.r;
     }
 
-    t->dirty = true;
     t->exiting = false;
     while (!t->exiting) {
         FD_ZERO(&rfd);
@@ -618,6 +617,7 @@ int main() {
         exit(1);
     }
 
+    term_redraw(&t);
     event_loop(&t);
 
     shell_exit(&t.shell);
