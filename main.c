@@ -247,6 +247,12 @@ void term_inserttext(Term *t, char *buf, size_t len) {
     t->dirty = true;
 }
 
+void term_kill_line(Term *t) {
+    t->editlen = 0;
+    t->cursor_pos = 0;
+    t->dirty = true;
+}
+
 void term_backspace(Term *t) {
     int i = t->cursor_pos;
     int len;
@@ -371,9 +377,16 @@ void xevent(Term *t, XEvent *xev) {
             break;
         default:
             if (n == 1 && buf[0] < 0x20) {
-                if (buf[0] == 4 && !shell_running(&t->shell)) {
-                    t->exiting = true;
-                    break;
+                if (!shell_running(&t->shell)) {
+                    if (buf[0] == 4) {
+                        // ^D
+                        t->exiting = true;
+                        break;
+                    } else if (buf[0] == 21) {
+                        // ^U
+                        term_kill_line(t);
+                        break;
+                    }
                 }
                 printf("keysym %ld, state=%d\n", sym, xev->xkey.state);
                 shell_write(&t->shell, t->edit, t->editlen);
