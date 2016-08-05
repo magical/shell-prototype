@@ -112,7 +112,7 @@ void draw_cursor(Term *t, int x, int y) {
     pango_layout_index_to_pos(t->layout, t->cursor_pos, &rect);
     pango_extents_to_pixels(&rect, NULL);
     rect.x += x;
-    rect.y += y - t->scroll;
+    rect.y += y;
     cairo_set_source(t->cr, t->fg);
     switch (t->cursor_type) {
     default:
@@ -129,7 +129,7 @@ void draw_cursor(Term *t, int x, int y) {
         cairo_set_source(t->cr, t->bg);
         cairo_rectangle(t->cr, rect.x, rect.y, rect.width, rect.height);
         cairo_clip(t->cr);
-        cairo_move_to(t->cr, x, y - t->scroll);
+        cairo_move_to(t->cr, x, y);
         // assume we just rendered the text
         pango_cairo_show_layout(t->cr, t->layout);
         break;
@@ -169,7 +169,7 @@ void term_redraw(Term *t) {
     draw_text(t->cr, t->layout, t->fg, t->edit, t->editlen);
 
     // Draw cursor
-    draw_cursor(t, t->border, rect.y+rect.height);
+    draw_cursor(t, t->border, rect.y+rect.height - t->scroll);
 
     cairo_pop_group_to_source(t->cr);
     cairo_paint(t->cr);
