@@ -593,6 +593,9 @@ int main() {
 
     term_set_font(&t, "Sans 10");
 
+    XResizeWindow(t.display, cairo_xlib_surface_get_drawable(t.surface),
+        t.charwidth*80, t.charheight*24);
+
     //char text[256] = "Hello, world! Pokémon. ポケモン. ポケットモンスター";
     char text[256] = "";
     t.edit = text;
