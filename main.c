@@ -10,7 +10,7 @@
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 #include <X11/Xutil.h>
-#include <cairo/cairo-xlib.h>
+#include <cairo-xlib.h>
 #include <pango/pangocairo.h>
 #include "utf8.h"
 #include "shell.h"

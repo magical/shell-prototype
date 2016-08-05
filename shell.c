@@ -119,8 +119,8 @@ void do_exec(Shell *sh, const char *cmd, char **argv) {
 }
 
 void shell_run(Shell *sh, char *cmdline) {
-    static const char* shellcmd = "/usr/lib/plan9/bin/rc";
-    char *argv[] = {"rc", "-c", "", 0};
+    static const char* shellcmd = "/bin/sh";
+    char *argv[] = {"sh", "-c", "", 0};
     argv[2] = cmdline;
     do_exec(sh, shellcmd, argv);
 }
