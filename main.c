@@ -358,7 +358,7 @@ void xevent(Term *t, XEvent *xev) {
             t->dirty = true;
             break;
         case XK_F3:
-            term_set_font(t, "Sans 10");
+            term_set_font(t, "Sans 16");
             break;
         case XK_F4:
             term_set_font(t, "Dina 10");
@@ -643,7 +643,7 @@ int main() {
     }
     XSetICFocus(t.ic);
 
-    term_set_font(&t, "Sans 10");
+    term_set_font(&t, "Sans 16");
 
     XResizeWindow(t.display, cairo_xlib_surface_get_drawable(t.surface),
         t.charwidth*80, t.charheight*24);
