@@ -415,6 +415,57 @@ void xevent(Term *t, XEvent *xev) {
     }
 }
 
+void printcsi(char *p, int len) {
+    int i, n, r;
+    for (i = 0; i < len; i += n) {
+        n = utf8decode(p+i, len-i, &r);
+        if (0x40 <= r && r <= 0x7F) {
+            i += n;
+            break;
+        }
+    }
+    printf("%.*s", i, p);
+}
+
+void printctls(char *p, int len) {
+    int i, n, r;
+    for (i = 0; i < len;) {
+        n = utf8decode(p+i, len-i, &r);
+        i += n;
+        if (n == 0) {
+            return;
+        }
+        switch (r) {
+        case '\a':
+            printf("^G\n");
+            break;
+        case '\b':
+            printf("^H\n");
+            break;
+        case 13:
+            printf("^M\n");
+            break;
+        case 0x1B:
+            printf("^[");
+            n = utf8decode(p+i, len-i, &r);
+            i += n;
+            if (n == 0) {
+                return;
+            }
+            if(r == 0);
+            switch (r) {
+            case '[':
+                printcsi(p+i, len-i);
+                break;
+            default:
+                printf("hmm");
+            }
+            printf("\n");
+            break;
+        }
+    }
+}
+
 int event_loop(Term *t) {
     XEvent xev;
     struct itimerspec its = {
@@ -511,6 +562,7 @@ int event_loop(Term *t) {
             }
             //printf("read %d bytes: %s\n", err, buf);
             if (err > 0) {
+                printctls(buf, err);
                 term_appendhist(t, buf, err);
             }
         }
