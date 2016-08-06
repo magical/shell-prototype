@@ -689,6 +689,7 @@ int main() {
     event_loop(&t);
 
     shell_exit(&t.shell);
+    free(t.hist);
     cairo_pattern_destroy(t.fg);
     cairo_pattern_destroy(t.bg);
     g_object_unref(t.layout);
