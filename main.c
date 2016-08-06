@@ -14,6 +14,7 @@
 #include <pango/pangocairo.h>
 #include "utf8.h"
 #include "shell.h"
+#include "term.h"
 
 int debug;
 
@@ -22,46 +23,6 @@ Atom wm_delete_window;
 
 const struct timeval select_timeout = {1, 0}; // 1s
 const struct timespec redraw_interval = {0, 1e9/30}; // 30 fps
-
-typedef struct Term Term;
-struct Term {
-    // X stuff
-    Display *display;
-    XIM im;
-    XIC ic;
-
-    // Cairo stuff
-    cairo_surface_t *surface;
-    cairo_t *cr;
-    cairo_pattern_t *fg;
-    cairo_pattern_t *bg;
-    PangoLayout *layout;
-    int border;
-    bool dirty;
-
-    // shell
-    Shell shell;
-    bool exiting;
-
-    int cursor_pos; // cursor position in bytes
-    int cursor_type; // cursor shape
-    double charwidth;
-    double charheight;
-    int inputx; // where the input is on the screen
-    int inputy;
-    int scroll; // scrollback y position in pixels
-    int height; // height of window
-
-    // edit buffer
-    char *edit;
-    int editlen;
-    int editcap;
-
-    // scrollback buffer
-    char *hist;
-    int histlen;
-    int histcap;
-};
 
 cairo_surface_t *cairo_create_x11_surface(Display *display, int x, int y) {
     int screen;
