@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
+#include <sys/resource.h>
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 #include <X11/Xutil.h>
@@ -123,19 +124,21 @@ void term_redraw(Term *t) {
     draw_text(t->cr, t->layout, t->fg, t->hist, t->histlen);
 
     // Draw input (below scrollback)
-    pango_layout_get_pixel_extents(t->layout, NULL, &rect);
-    t->inputx = t->border;
-    t->inputy = rect.y + rect.height;
+    //pango_layout_get_pixel_extents(t->layout, NULL, &rect);
+    pango_layout_index_to_pos(t->layout, t->histlen, &rect);
+    pango_extents_to_pixels(NULL, &rect);
+    t->inputx = t->border + rect.x;
+    t->inputy = t->border + rect.y;
+    printf("%d,%d\n", rect.x, rect.y);
     cairo_move_to(t->cr, t->inputx, t->inputy - t->scroll);
     draw_text(t->cr, t->layout, t->fg, t->edit, t->editlen);
 
     // Draw cursor
-    draw_cursor(t, t->border, rect.y+rect.height - t->scroll);
+    draw_cursor(t, t->border + rect.x, t->border + rect.y - t->scroll);
 
     cairo_pop_group_to_source(t->cr);
     cairo_paint(t->cr);
     cairo_surface_flush(t->surface);
-    XFlush(t->display);
     t->dirty = false;
 }
 
@@ -182,6 +185,9 @@ void term_appendhist(Term *t, char *buf, size_t len) {
         if (newcap < t->histcap) {
             printf("overflow\n");
             exit(1);
+        }
+        if (debug) {
+            printf("resizing hist from %d to %d\n", t->histcap, newcap);
         }
         v = realloc(t->hist, newcap);
         if (v == NULL) {
@@ -285,12 +291,13 @@ void xevent(Term *t, XEvent *xev) {
                 shell_write(&t->shell, t->edit, t->editlen);
                 shell_write(&t->shell, "\n", 1);
             } else {
-                term_appendhist(t, "% ", 2);
                 term_appendhist(t, t->edit, t->editlen);
                 term_appendhist(t, "\n", 1);
                 if (t->editlen < t->editcap) {
                     t->edit[t->editlen] = '\0';
                     shell_run(&t->shell, t->edit);
+                } else {
+                    // TODO
                 }
             }
             t->editlen = 0;
@@ -368,6 +375,7 @@ void xevent(Term *t, XEvent *xev) {
     case ClientMessage:
         if (xev->xclient.message_type == wm_protocols && (Atom)xev->xclient.data.l[0] == wm_delete_window) {
             //fprintf(stderr, "got close event\n");
+            // TODO: warn if programs still running
             t->exiting = true;
         }
         break;
@@ -417,7 +425,7 @@ void printctls(char *p, int len) {
             printf("^H\n");
             break;
         case 13:
-            printf("^M\n");
+            //printf("^M\n");
             break;
         case 0x1B:
             printf("^[");
@@ -468,7 +476,7 @@ int event_loop(Term *t) {
         return -1;
     }
 
-    maxfd = t->shell.fd;
+    maxfd = shell_fd(&t->shell);
     if (xfd > maxfd) {
         maxfd = xfd;
     }
@@ -482,7 +490,7 @@ int event_loop(Term *t) {
     t->exiting = false;
     while (!t->exiting) {
         FD_ZERO(&rfd);
-        FD_SET(t->shell.fd, &rfd);
+        FD_SET(shell_fd(&t->shell), &rfd);
         FD_SET(selfpipe.r, &rfd);
         FD_SET(xfd, &rfd);
         FD_SET(timerfd, &rfd);
@@ -505,7 +513,7 @@ int event_loop(Term *t) {
 
         if (err == 0) {
             if (debug) {
-                printf("timeout\n");
+                printf("select timeout\n");
             }
             term_redraw(t);
             continue;
@@ -516,32 +524,38 @@ int event_loop(Term *t) {
             gettimeofday(&then, NULL);
         }
 
-        if (FD_ISSET(selfpipe.r, &rfd)) {
-            err = read(selfpipe.r, buf, 1);
-            if (err < 0) {
-                perror("read selfpipe");
-                continue;
-            }
-            shell_reap(&t->shell);
-        }
-
-        if (FD_ISSET(t->shell.fd, &rfd)) {
-            if (debug) {
-                printf("shell\n");
-            }
+        if (FD_ISSET(shell_fd(&t->shell), &rfd)) {
             err = shell_read(&t->shell, buf, sizeof buf);
             if (err < 0) {
                 perror("read shell");
                 continue;
             }
-            //printf("read %d bytes: %s\n", err, buf);
+            if (debug) {
+                //printf("shell read %d bytes\n", err);
+            }
             if (err > 0) {
                 printctls(buf, err);
                 term_appendhist(t, buf, err);
             }
         }
 
-        if (FD_ISSET(xfd, &rfd)) {
+        if (FD_ISSET(selfpipe.r, &rfd)) {
+            if (debug) {
+                printf("reap\n");
+            }
+            err = read(selfpipe.r, buf, 1);
+            if (err < 0) {
+                perror("read selfpipe");
+                continue;
+            }
+            shell_reap(&t->shell);
+            if (t->hist[t->histlen-1] != '\n') {
+                term_appendhist(t, "\n", 1);
+            }
+            term_appendhist(t, "% ", 2);
+        }
+
+        if (FD_ISSET(xfd, &rfd) || XEventsQueued(t->display, QueuedAlready)) {
             if (debug) {
                 printf("xevent\n");
             }
@@ -555,22 +569,26 @@ int event_loop(Term *t) {
         }
 
         if (FD_ISSET(timerfd, &rfd)) {
-            read(timerfd, buf, sizeof buf);
+            err = read(timerfd, buf, sizeof buf);
             if (t->dirty) {
                 if (debug) {
-                    printf("timer redraw\n");
+                    printf("timer redraw %d, %ld\n", err, *(long*)&buf);
                 }
                 term_redraw(t);
+                XFlush(t->display);
+                // After flushing, x may read queued events
+                // but the xfd won't be readable (because it's already been read)
             }
         }
 
-        if (debug) {
+        if (0 && debug) {
             gettimeofday(&now, NULL);
             int diff = (now.tv_sec - then.tv_sec)*1000000 + (now.tv_usec - then.tv_usec);
             printf("handled %d events in %d µ\n", nevents, diff);
         }
     }
 
+    close(timerfd);
     return 0;
 }
 
@@ -646,7 +664,9 @@ int main() {
         exit(1);
     }
 
+    term_appendhist(&t, "% ", 2);
     term_redraw(&t);
+    XFlush(t.display);
     event_loop(&t);
 
     shell_exit(&t.shell);
