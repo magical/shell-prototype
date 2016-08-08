@@ -214,6 +214,27 @@ void term_inserttext(Term *t, char *buf, size_t len) {
     t->dirty = true;
 }
 
+void term_scrolltoinput(Term *t) {
+    if (t->inputy + t->charheight >= t->scroll && t->inputy <= t->scroll+t->height) {
+        return;
+    }
+    t->scroll = t->inputy - t->height + t->charheight;
+    if (t->scroll < t->border) {
+        t->scroll = t->border;
+    }
+    t->dirty = true;
+
+    /* desired scrolling behaviour:
+        if a command immediately prints a shitton of output,
+        scroll as much of it into view as possible without
+        pushing the top offscreen
+
+        otherwise, don't scroll automatically on output
+
+        if the user types, scroll to the input (if necessary)
+    */
+}
+
 void term_kill_line(Term *t) {
     t->editlen = 0;
     t->cursor_pos = 0;
@@ -345,27 +366,31 @@ void xevent(Term *t, XEvent *xev) {
             break;
         default:
             if (n == 1 && buf[0] < 0x20) {
-                if (!shell_running(&t->shell)) {
+                // control character.
+                // if a program is running,
+                // flush the buffer and pass it through
+                if (shell_running(&t->shell)) {
+                    printf("keysym %ld, state=%d\n", sym, xev->xkey.state);
+                    shell_write(&t->shell, t->edit, t->editlen);
+                    shell_write(&t->shell, buf, 1);
+                    t->editlen = 0;
+                    t->cursor_pos = 0;
+                } else {
                     if (buf[0] == 4) {
                         // ^D
                         t->exiting = true;
-                        break;
                     } else if (buf[0] == 21) {
                         // ^U
                         term_kill_line(t);
-                        break;
+                    } else {
+                        // ignore
                     }
                 }
-                printf("keysym %ld, state=%d\n", sym, xev->xkey.state);
-                shell_write(&t->shell, t->edit, t->editlen);
-                shell_write(&t->shell, buf, 1);
-                t->editlen = 0;
-                t->cursor_pos = 0;
-                break;
+            } else {
+                //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
+                term_inserttext(t, buf, n);
+                term_scrolltoinput(t);
             }
-            //printf("key %ld, n=%d, buf=%.*s\n", sym, n, n, buf);
-            term_inserttext(t, buf, n);
-            break;
         }
         break;
 
