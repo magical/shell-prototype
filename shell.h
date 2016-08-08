@@ -1,3 +1,5 @@
+//#include <termios.h> /* struct termios */
+//#include <sys/resource.h> /* struct rusage */
 //#include <stdbool.h> /* bool */
 //#include <unistd.h> /* ssize_t, pid_t */
 
@@ -18,6 +20,8 @@ struct Shell {
     pid_t pid; // current job
     int fd;  // pty master
     int sfd; // pty slave
+
+    struct termios tc;
 
     Job **jobs;
     int joblen;

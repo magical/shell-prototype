@@ -5,6 +5,7 @@
 #include <locale.h>
 #include <errno.h>
 #include <unistd.h>
+#include <termios.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
 #include <sys/resource.h>

@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <pty.h>
+#include <termios.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
@@ -56,6 +57,10 @@ int shell_init(Shell *sh) {
     }
     cloexec(mfd);
     cloexec(sfd);
+
+    tcgetattr(sfd, &sh->tc);
+    sh->tc.c_lflag &= ~ICANON;
+    tcsetattr(sfd, 0, &sh->tc);
 
     signal(SIGCHLD, sigchld);
 
